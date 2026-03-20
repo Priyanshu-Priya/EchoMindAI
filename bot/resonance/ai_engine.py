@@ -5,8 +5,8 @@ AI Engine — generate structured reviews using Groq API.
 import json
 from groq import Groq
 
-from bot.config import settings
-from bot.logger import log
+from bot.core.config import settings
+from bot.core.logger import log
 
 # Initialize Groq client
 client = Groq(api_key=settings.groq_api_key)

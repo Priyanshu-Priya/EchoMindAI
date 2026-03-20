@@ -6,8 +6,8 @@ from functools import wraps
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from bot.config import settings
-from bot.logger import log
+from bot.core.config import settings
+from bot.core.logger import log
 
 
 def is_authorized(user) -> bool:

@@ -5,105 +5,34 @@ Handlers — Telegram command and message handlers for the review workflow.
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from bot.auth import authorized
-from bot.session import get_session, clear_session, set_session_data
-from bot.content_detector import extract_url, detect_content_type, fetch_url_metadata
-from bot.ai_engine import generate_review
-from bot.database import save_resonance_entry
-from bot.formatter import format_preview, format_success
-from bot.keyboards import (
+from bot.core.auth import authorized
+from bot.core.session import get_session, clear_session, set_session_data
+from bot.resonance.content_detector import extract_url, detect_content_type, fetch_url_metadata
+from bot.resonance.ai_engine import generate_review
+from bot.resonance.db_repo import save_resonance_entry
+from bot.resonance.formatter import format_preview, format_success
+from bot.resonance.keyboards import (
     preview_keyboard,
     edit_field_keyboard,
     type_selection_keyboard,
     rating_keyboard,
 )
-from bot.logger import log
-
-
-# ─── Command Handlers ────────────────────────────────────────────────
-
-
-@authorized
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start — welcome message."""
-    await update.message.reply_text(
-        "👋 *Welcome to Resonance Bot!*\n\n"
-        "I'm your AI-powered content curator. Send me:\n\n"
-        "• A *URL* (YouTube, article, blog, podcast)\n"
-        "• A *book name* (e.g., _Sapiens by Yuval Noah Harari_)\n"
-        "• A *podcast title* or *video name*\n\n"
-        "I'll generate a sharp, curated review for your Resonance dashboard.\n\n"
-        "*Commands:*\n"
-        "/start — This message\n"
-        "/help — Detailed usage guide\n"
-        "/fast — Toggle fast mode (skip preview)\n"
-        "/cancel — Cancel current operation",
-        parse_mode="Markdown",
-    )
-
-
-@authorized
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /help — detailed usage guide."""
-    await update.message.reply_text(
-        "📖 *How to use Resonance Bot*\n"
-        "─────────────────\n\n"
-        "*1. Send content*\n"
-        "Paste a URL or type a title. I'll auto-detect the type.\n\n"
-        "*2. Review preview*\n"
-        "I'll generate a review and show you a preview with:\n"
-        "  📌 Title — 📂 Type — 💬 Review — ⭐ Rating — 🏷️ Tags\n\n"
-        "*3. Choose an action:*\n"
-        "  ✅ *Confirm* — Save to your dashboard\n"
-        "  ✏️ *Edit* — Modify any field\n"
-        "  🔄 *Regenerate* — Get a fresh AI review\n"
-        "  ❌ *Cancel* — Discard everything\n\n"
-        "*4. Fast mode*\n"
-        "Use /fast to toggle. When ON, reviews are saved instantly\n"
-        "without preview (for quick adds).\n\n"
-        "💡 _Tip: The AI works best with specific titles or clean URLs._",
-        parse_mode="Markdown",
-    )
-
-
-@authorized
-async def fast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /fast — toggle fast mode."""
-    session = get_session(update.effective_user.id)
-    session.fast_mode = not session.fast_mode
-    status = "ON ⚡" if session.fast_mode else "OFF 🐢"
-    await update.message.reply_text(
-        f"🔀 Fast mode is now *{status}*\n\n"
-        f"{'Reviews will be saved instantly without preview.' if session.fast_mode else 'You will see a preview before saving.'}",
-        parse_mode="Markdown",
-    )
-
-
-@authorized
-async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /cancel — discard current operation."""
-    user_id = update.effective_user.id
-    session = get_session(user_id)
-    if session.state == "idle":
-        await update.message.reply_text("ℹ️ Nothing to cancel.")
-        return
-    clear_session(user_id)
-    await update.message.reply_text("❌ Operation cancelled. Session cleared.")
+from bot.core.logger import log
 
 
 # ─── Main Text Input Handler ─────────────────────────────────────────
 
 
 @authorized
-async def handle_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle any text message — the main entry point for content curation."""
+async def process_new_resonance(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, edit_message=None, force_type=None):
+    """Process text input specific to Resonance content curation."""
     user_id = update.effective_user.id
     session = get_session(user_id)
-    text = update.message.text.strip()
+    session.domain = "resonance"
 
     # If we're in editing_field state, route to edit handler
     if session.state == "editing_field":
-        await _handle_edit_value(update, context, session, text)
+        await process_resonance_edit_input(update, context, session, text)
         return
 
     # If there's already a pending review, tell user to act on it
@@ -116,12 +45,15 @@ async def handle_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Start processing new input
-    processing_msg = await update.message.reply_text("🔍 Analyzing your content...")
+    if edit_message:
+        processing_msg = edit_message
+    else:
+        processing_msg = await update.message.reply_text("🔍 Analyzing your content...")
 
     try:
         # Extract URL and detect type
         url = extract_url(text)
-        content_type = detect_content_type(text, url)
+        content_type = force_type if force_type else detect_content_type(text, url)
 
         # Fetch metadata if URL found
         metadata = None
@@ -143,7 +75,7 @@ async def handle_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Fast mode: save immediately
         if session.fast_mode:
             await processing_msg.edit_text("⚡ Saving (fast mode)...")
-            await save_resonance_entry(data)
+            save_resonance_entry(data)
             clear_session(user_id)
             await processing_msg.edit_text(
                 format_success(data),
@@ -198,7 +130,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         try:
             await query.edit_message_text("💾 Saving to your dashboard...")
-            await save_resonance_entry(session.data)
+            save_resonance_entry(session.data)
             await query.edit_message_text(
                 format_success(session.data),
                 parse_mode="Markdown",
@@ -329,7 +261,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─── Edit Value Handler ──────────────────────────────────────────────
 
 
-async def _handle_edit_value(
+async def process_resonance_edit_input(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     session,

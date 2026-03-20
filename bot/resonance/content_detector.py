@@ -7,7 +7,7 @@ from typing import Optional
 
 import httpx
 
-from bot.logger import log
+from bot.core.logger import log
 
 
 # URL extraction pattern
