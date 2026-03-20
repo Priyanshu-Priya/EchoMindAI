@@ -2,6 +2,7 @@
 Telegram Bot Main Entry Point — Application builder.
 """
 
+import asyncio
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from bot.core.config import settings
 from bot.core.handlers import (
@@ -48,6 +49,13 @@ def main():
     
     # Generic callback handler (parses domain specific callbacks)
     app.add_handler(CallbackQueryHandler(master_callback_handler))
+
+    # Provide a new event loop for Python 3.14+ before block polling
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
     # Run the bot until Ctrl-C
     app.run_polling()
