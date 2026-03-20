@@ -30,7 +30,7 @@ async def post_init(application):
 
 def main():
     """Build and run the bot application."""
-    log.info("Starting Dashboard Automation Bot (Resonance & Thoughts)...")
+    log.info("Starting EchoMindAiBot...")
 
     # Build the Application
     app = ApplicationBuilder().token(settings.telegram_bot_token).post_init(post_init).build()

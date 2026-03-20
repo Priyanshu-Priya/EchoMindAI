@@ -15,7 +15,7 @@ from bot.resonance.content_detector import extract_url, detect_content_type
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start — welcome message."""
     await update.message.reply_text(
-        "👋 *Welcome to the Dashboard Automation Bot!*\n\n"
+        "👋 *Welcome to EchoMindAiBot!*\n\n"
         "Send me a URL or plain text, and I'll route it automatically. Or use explicit commands:\n\n"
         "*Commands:*\n"
         "💭 `/thought <text>` — Instantly save a fleeting observation\n"
