@@ -2,6 +2,7 @@
 Telegram Bot Main Entry Point — Application builder.
 """
 
+import asyncio
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from bot.core.config import settings
 from bot.core.handlers import (
@@ -28,7 +29,7 @@ async def post_init(application):
     ])
 
 
-def main():
+async def main():
     """Build and run the bot application."""
     log.info("Starting EchoMindAiBot...")
 
@@ -50,8 +51,8 @@ def main():
     app.add_handler(CallbackQueryHandler(master_callback_handler))
 
     # Run the bot until Ctrl-C
-    app.run_polling()
+    await app.run_polling()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
