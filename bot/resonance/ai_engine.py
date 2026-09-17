@@ -11,8 +11,14 @@ from bot.core.logger import log
 # Initialize Groq client
 client = Groq(api_key=settings.groq_api_key)
 
-# Best available free model on Groq: OpenAI's 120B OSS model on Groq LPU
-MODEL_ID = "openai/gpt-oss-120b"
+# Fallback chain — tried in order; next model is used on rate-limit or error.
+# Ranked by capability on Groq's free LPU tier (as of Sep 2026).
+MODELS = [
+    "openai/gpt-oss-120b",          # 1st choice: OpenAI 120B OSS on Groq LPU
+    "moonshotai/kimi-k2-instruct",  # 2nd: Moonshot Kimi K2 — strong reasoning
+    "llama-3.3-70b-versatile",      # 3rd: Meta Llama 3.3 70B — proven fallback
+    "llama-3.1-8b-instant",         # 4th: ultra-fast lightweight last resort
+]
 
 SYSTEM_PROMPT = """You are a cutting-edge content curator AI, residing at the intersection of philosophy, technology, culture, and human behavior. Your taste is razor-sharp, intellectual, and uncompromising. Your job is to generate structured review entries for a personal "Resonance" dashboard.
 
@@ -90,50 +96,70 @@ async def generate_review(
 
     log.info("Generating review for: %s", user_input[:80])
 
-    try:
-        completion = client.chat.completions.create(
-            model=MODEL_ID,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.7,
-            max_tokens=300,
-            response_format={"type": "json_object"},
-        )
+    last_error: Exception | None = None
 
-        raw = completion.choices[0].message.content.strip()
-        log.debug("Groq raw response: %s", raw)
+    for model in MODELS:
+        try:
+            log.debug("Trying model: %s", model)
+            completion = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.7,
+                max_tokens=300,
+                response_format={"type": "json_object"},
+            )
 
-        # Strip markdown code fences if present (safety net)
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-        if raw.endswith("```"):
-            raw = raw[:-3].strip()
-        if raw.startswith("json"):
-            raw = raw[4:].strip()
+            raw = completion.choices[0].message.content.strip()
+            log.debug("Groq raw response (%s): %s", model, raw)
 
-        data = json.loads(raw)
+            # Strip markdown code fences if present (safety net)
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+            if raw.endswith("```"):
+                raw = raw[:-3].strip()
+            if raw.startswith("json"):
+                raw = raw[4:].strip()
 
-        # Validate required fields
-        required = {"title", "type", "review", "rating"}
-        if not required.issubset(data.keys()):
-            raise ValueError(f"Missing fields: {required - data.keys()}")
+            data = json.loads(raw)
 
-        # Normalize
-        data["rating"] = max(1, min(5, int(data["rating"])))
-        data["type"] = data["type"].capitalize()
-        data["tags"] = data.get("tags", [])
+            # Validate required fields
+            required = {"title", "type", "review", "rating"}
+            if not required.issubset(data.keys()):
+                raise ValueError(f"Missing fields: {required - data.keys()}")
 
-        if data["type"] not in ("Article", "Video", "Book", "Podcast"):
-            data["type"] = "Article"  # safe default
+            # Normalize
+            data["rating"] = max(1, min(5, int(data["rating"])))
+            data["type"] = data["type"].capitalize()
+            data["tags"] = data.get("tags", [])
 
-        log.info("Review generated: %s (%s, %d⭐)", data["title"], data["type"], data["rating"])
-        return data
+            if data["type"] not in ("Article", "Video", "Book", "Podcast"):
+                data["type"] = "Article"  # safe default
 
-    except json.JSONDecodeError as e:
-        log.error("Failed to parse Groq response as JSON: %s", e)
-        raise ValueError(f"AI returned invalid JSON: {e}") from e
-    except Exception as e:
-        log.error("Groq API error: %s", e)
-        raise
+            log.info(
+                "Review generated via %s: %s (%s, %d⭐)",
+                model, data["title"], data["type"], data["rating"],
+            )
+            return data
+
+        except json.JSONDecodeError as e:
+            # Bad JSON is a model response issue — no point retrying same input
+            log.error("Failed to parse Groq response as JSON (%s): %s", model, e)
+            raise ValueError(f"AI returned invalid JSON: {e}") from e
+
+        except Exception as e:
+            err_str = str(e)
+            # Retry on rate-limit (429) or model-unavailable errors only
+            if any(code in err_str for code in ("429", "503", "model_not_found", "unavailable")):
+                log.warning("Model %s unavailable/rate-limited, trying next. Error: %s", model, e)
+                last_error = e
+                continue
+            # Any other error (auth, bad request, etc.) — fail immediately
+            log.error("Groq API error (%s): %s", model, e)
+            raise
+
+    # All models exhausted
+    log.error("All fallback models failed. Last error: %s", last_error)
+    raise RuntimeError("All Groq models are currently unavailable. Please try again later.") from last_error
