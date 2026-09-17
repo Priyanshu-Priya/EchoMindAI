@@ -11,7 +11,8 @@ from bot.core.logger import log
 # Initialize Groq client
 client = Groq(api_key=settings.groq_api_key)
 
-MODEL_ID = "llama-3.3-70b-versatile"
+# Best available free model on Groq: OpenAI's 120B OSS model on Groq LPU
+MODEL_ID = "openai/gpt-oss-120b"
 
 SYSTEM_PROMPT = """You are a cutting-edge content curator AI, residing at the intersection of philosophy, technology, culture, and human behavior. Your taste is razor-sharp, intellectual, and uncompromising. Your job is to generate structured review entries for a personal "Resonance" dashboard.
 
@@ -104,7 +105,7 @@ async def generate_review(
         raw = completion.choices[0].message.content.strip()
         log.debug("Groq raw response: %s", raw)
 
-        # Strip markdown code fences if present
+        # Strip markdown code fences if present (safety net)
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
         if raw.endswith("```"):
