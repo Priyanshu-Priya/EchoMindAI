@@ -108,7 +108,7 @@ async def generate_review(
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.7,
-                max_tokens=300,
+                max_tokens=512,
                 response_format={"type": "json_object"},
             )
 
@@ -152,8 +152,12 @@ async def generate_review(
         except Exception as e:
             err_str = str(e)
             # Retry on rate-limit (429) or model-unavailable errors only
-            if any(code in err_str for code in ("429", "503", "model_not_found", "unavailable")):
-                log.warning("Model %s unavailable/rate-limited, trying next. Error: %s", model, e)
+            if any(code in err_str for code in (
+                "429", "503", "model_not_found", "unavailable",
+                # 400 json_validate_failed = model hit token limit before closing JSON
+                "json_validate_failed", "max completion tokens",
+            )):
+                log.warning("Model %s failed/rate-limited, trying next. Error: %s", model, e)
                 last_error = e
                 continue
             # Any other error (auth, bad request, etc.) — fail immediately
